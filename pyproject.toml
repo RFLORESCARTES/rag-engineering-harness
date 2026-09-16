@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rag-engineering-harness"
+version = "0.1.0"
+description = "Framework-agnostic deterministic-first evaluation harness for RAG systems"
+requires-python = ">=3.10"
+dependencies = ["PyYAML>=6.0", "jsonschema>=4.20"]
+license = {text = "MIT"}
+
+[project.scripts]
+rag-harness = "rag_harness.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
