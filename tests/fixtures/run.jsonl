@@ -1,0 +1,3 @@
+{"id":"Q001","retrieved":["DOC2026#dose","DOC2024#dose","OTHER#1"],"answer":"10 mg","abstained":false,"citations":["DOC2026#dose"],"latency_ms":120}
+{"id":"Q002","retrieved":["PROTOCOL#endpoint","OTHER#2"],"answer":"Mean 3D displacement","abstained":false,"citations":["PROTOCOL#endpoint"],"latency_ms":95}
+{"id":"Q003","retrieved":["OTHER#3"],"answer":null,"abstained":true,"citations":[],"latency_ms":80}
