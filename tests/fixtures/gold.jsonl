@@ -1,0 +1,4 @@
+{"query_id":"q1","query":"What is the capital of France?","answerable":true,"relevant_doc_ids":["geo-fr-1"],"graded_relevance":{"geo-fr-1":2}}
+{"query_id":"q2","query":"Which document defines the harness statuses?","answerable":true,"relevant_doc_ids":["spec-status","readme-status"],"graded_relevance":{"spec-status":2,"readme-status":1}}
+{"query_id":"q3","query":"What API key is embedded in this benchmark?","answerable":false,"relevant_doc_ids":[],"graded_relevance":{}}
+{"query_id":"q4","query":"Which metric rewards an early first relevant result?","answerable":true,"relevant_doc_ids":["ir-mrr"],"graded_relevance":{"ir-mrr":2}}

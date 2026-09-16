@@ -1,18 +1,30 @@
 # RAG Engineering Harness
 
-Framework-agnostic, deterministic-first harness for empirical validation, diagnosis, controlled optimization, regression testing, and release gating of Retrieval-Augmented Generation (RAG) systems.
+Framework-agnostic, deterministic-first harness for empirical validation,
+diagnosis, controlled optimization, regression testing, and release gating of
+Retrieval-Augmented Generation (RAG) systems.
 
 **Version:** 0.1.0 (V1 foundation)
 
+## What this repository does
+
+It evaluates an already-produced RAG run against a frozen gold set. The RAG
+stack can use any database, embedding model, reranker, LLM, graph, or framework;
+an adapter only needs to export canonical JSONL. The harness itself makes no API
+calls and the included smoke test requires no keys, network, embeddings, or paid
+models.
+
 ## Design principles
 
-1. **Diagnose before optimize.** No tuning before the failing layer is identified with evidence.
-2. **Deterministic-first.** Compute retrieval/ranking/gating metrics in code; use LLM judges only for irreducibly semantic judgments.
-3. **Immutable evaluation contract.** Agents must not silently edit the gold set, thresholds, scoring code, or stop conditions to obtain a pass.
-4. **Layered evaluation.** Audit ingestion, retrieval, ranking, context, generation, citations, abstention, latency/cost, and regression separately.
-5. **Controlled experiments.** Change one primary variable at a time, compare against a frozen baseline, and record the result.
-6. **Failure becomes memory.** Every corrected production-relevant failure becomes a regression test.
-7. **Provider agnostic.** The harness contract is independent of vector database, embedding model, reranker, LLM, orchestration framework, and graph implementation.
+1. **Diagnose before optimize.** Do not tune before locating the failing layer.
+2. **Deterministic-first.** Compute measurable IR and gate evidence in code.
+3. **Immutable evaluation contract.** Never edit gold data, thresholds, scoring,
+   fixtures, or stop conditions to manufacture a pass.
+4. **Layered evaluation.** Separate ingestion, retrieval, ranking, context,
+   generation, citations, abstention, latency/cost, and regression.
+5. **Controlled experiments.** Change one primary variable at a time.
+6. **Failure becomes memory.** Add corrected real failures as regressions.
+7. **Provider agnostic.** Normalize provider output; do not change the evaluator.
 
 ## Lifecycle
 
@@ -20,40 +32,103 @@ Framework-agnostic, deterministic-first harness for empirical validation, diagno
 
 ## Quick start
 
+Python 3.10 or newer is required. From a clean checkout:
+
 ```bash
 python -m pip install -e .
 rag-harness validate-config rag_harness.yaml
-rag-harness evaluate --gold tests/fixtures/gold.jsonl --run tests/fixtures/run.jsonl --out reports/latest
-rag-harness gate --metrics reports/latest/metrics.json --config rag_harness.yaml
+rag-harness evaluate \
+  --gold tests/fixtures/gold.jsonl \
+  --run tests/fixtures/run.jsonl \
+  --out reports/latest
+rag-harness gate \
+  --metrics reports/latest/metrics.json \
+  --config rag_harness.yaml
 ```
 
-The included fixture intentionally contains a small deterministic benchmark so the evaluator and gate can be smoke-tested without API keys, embeddings, or paid models.
+The final command writes `reports/latest/gate.json` and exits `0` for the
+included passing fixture. Run the test suite with:
 
-## Core files
+```bash
+python -m unittest discover -s tests -v
+```
 
-- `RAG_HARNESS_SPEC.md`: normative contract and stop conditions.
-- `skills/rag-engineer/SKILL.md`: portable operating instructions for an LLM/agent.
-- `rag_harness.yaml`: project configuration and release thresholds.
-- `schemas/`: machine-readable contracts.
-- `src/rag_harness/`: deterministic evaluator, gate, validation, and CLI.
-- `tests/fixtures/`: minimal executable benchmark.
-- `protocols/`: operational procedures for corpus audit, evaluation, diagnosis, experiments, and release.
+To confirm that the gate distinguishes poor quality from broken evidence:
 
-## Evaluation model
+```bash
+rag-harness evaluate \
+  --gold tests/fixtures/gold.jsonl \
+  --run tests/fixtures/run_fail.jsonl \
+  --out reports/failing
+rag-harness gate \
+  --metrics reports/failing/metrics.json \
+  --config rag_harness.yaml
+```
 
-Retrieval metrics include Hit@K, Recall@K, Precision@K, MRR@K, and nDCG@K. This follows established IR practice; BEIR exposes nDCG, MAP, Recall, Precision and custom MRR evaluation. Generation-side semantic metrics are deliberately adapter-based rather than hard-wired to one judge framework.
+That gate is expected to return `FAIL` with exit code `1`, not `BLOCKED`.
 
-## Status semantics
+## Canonical adapter output
 
-- **PASS**: every mandatory gate passes and no critical invariant is violated.
-- **FAIL**: evaluation completed, but one or more quality thresholds fail.
-- **BLOCKED**: trustworthy evaluation cannot be completed (for example invalid gold set, missing provenance, benchmark mutation, missing required evidence, or evaluator integrity failure).
+Each line of a run is one JSON object:
 
-A high average score never overrides a critical blocker.
+```json
+{
+  "query_id": "q1",
+  "retrieved": [{"doc_id": "doc-7", "rank": 1, "score": 0.91}],
+  "answer": "Example answer",
+  "citations": ["doc-7"],
+  "abstained": false,
+  "latency_ms": 125,
+  "cost_usd": 0.001,
+  "provenance": {
+    "system": "my-rag",
+    "run_id": "baseline-001",
+    "created_at": "2026-09-16T00:00:00Z"
+  }
+}
+```
 
-## Scope of V1
+See `schemas/run.schema.json` for the machine-readable contract.
 
-V1 supplies the portable contract, deterministic IR evaluator, configuration validation, release gate, schemas, test taxonomy, experiment ledger contract, generic adapter contract, and smoke-test fixtures. Live connectors to individual RAG stacks are intentionally adapters: they should transform stack-specific outputs into the canonical run schema rather than changing the evaluator.
+## Metrics and integrity
+
+The evaluator computes Hit@K, Recall@K, Precision@K, MRR@K, nDCG@K, citation
+precision/recall, abstention accuracy, p95 latency, and mean cost. It records
+SHA-256 hashes of the gold set, run, configuration, and evaluator code before
+and after evaluation. The gate rechecks those hashes. Mutation produces
+`BLOCKED: EVALUATION_CONTRACT_MUTATED` instead of a potentially false result.
+
+The configuration file is named `.yaml` but deliberately uses JSON-compatible
+YAML, allowing offline parsing with Python's standard library and no runtime
+dependencies.
+
+## Status and exit codes
+
+| Verdict | Meaning | Exit code |
+|---|---|---:|
+| `PASS` | Trustworthy evaluation and every mandatory gate passed | 0 |
+| `FAIL` | Trustworthy evaluation completed, but a quality gate failed | 1 |
+| `BLOCKED` | Trustworthy evaluation could not be completed | 2 |
+
+A high average never overrides a critical blocker.
+
+## Repository map
+
+- `RAG_HARNESS_SPEC.md`: normative contract, invariants, and boundaries.
+- `skills/rag-engineer/SKILL.md`: portable agent operating instructions.
+- `rag_harness.yaml`: thresholds, limits, and integrity policy.
+- `schemas/`: canonical gold, run, metrics, and experiment contracts.
+- `src/rag_harness/`: evaluator, integrity verifier, gate, and CLI.
+- `tests/fixtures/`: passing and failing deterministic benchmarks.
+- `protocols/`: audit, evaluation, diagnosis, experiment, and release procedures.
+
+## Methodological boundary
+
+A smoke-test `PASS` proves that the deterministic evaluator and gate behave as
+specified on the fixture. It does **not** prove corpus representativeness,
+semantic answer correctness, faithfulness, fairness, or production readiness.
+Those require project-specific gold data, slice analysis, and—where genuinely
+needed—separately validated semantic judges.
 
 ## License
 
