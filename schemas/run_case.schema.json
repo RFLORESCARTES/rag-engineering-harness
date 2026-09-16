@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RAG Run Case",
+  "type": "object",
+  "required": ["id", "retrieved"],
+  "properties": {
+    "id": {"type": "string"},
+    "retrieved": {"type": "array", "items": {"type": "string"}},
+    "scores": {"type": "array", "items": {"type": "number"}},
+    "answer": {"type": ["string", "null"]},
+    "abstained": {"type": ["boolean", "null"]},
+    "citations": {"type": "array", "items": {"type": "string"}},
+    "latency_ms": {"type": ["number", "null"], "minimum": 0},
+    "cost": {"type": ["number", "null"], "minimum": 0},
+    "metadata": {"type": "object"}
+  },
+  "additionalProperties": true
+}
