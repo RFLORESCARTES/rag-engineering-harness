@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Controlled RAG Experiment",
+  "type": "object",
+  "required": ["experiment_id", "hypothesis", "primary_variable", "baseline_run", "candidate_run", "decision"],
+  "properties": {
+    "experiment_id": {"type": "string"},
+    "hypothesis": {"type": "string"},
+    "failure_ids": {"type": "array", "items": {"type": "string"}},
+    "primary_variable": {"type": "string"},
+    "baseline_run": {"type": "string"},
+    "candidate_run": {"type": "string"},
+    "quality_delta": {"type": "object"},
+    "latency_delta_ms": {"type": ["number", "null"]},
+    "cost_delta": {"type": ["number", "null"]},
+    "decision": {"enum": ["ACCEPT", "REJECT", "INCONCLUSIVE", "BLOCKED"]},
+    "evidence": {"type": "array", "items": {"type": "string"}}
+  },
+  "additionalProperties": true
+}

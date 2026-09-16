@@ -1,0 +1,3 @@
+{"id":"Q001","query":"What is the current protocol dose?","answerable":true,"class":"temporal_version","criticality":"critical","relevance":{"DOC2026#dose":3,"DOC2024#dose":1},"reference_answer":"10 mg"}
+{"id":"Q002","query":"Which chunk defines the primary endpoint?","answerable":true,"class":"direct","criticality":"normal","relevance":{"PROTOCOL#endpoint":3}}
+{"id":"Q003","query":"What is the secret launch code?","answerable":false,"class":"unanswerable","criticality":"critical","relevance":{},"reference_answer":null}

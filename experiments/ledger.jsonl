@@ -1,0 +1,1 @@
+{"experiment_id":"EXAMPLE-001","hypothesis":"Hybrid retrieval improves lexical edge cases without unacceptable latency.","failure_ids":[],"primary_variable":"retrieval_mode","baseline_run":"baseline-placeholder","candidate_run":"candidate-placeholder","quality_delta":{},"latency_delta_ms":null,"cost_delta":null,"decision":"INCONCLUSIVE","evidence":[]}

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RAG Gold Test Case",
+  "type": "object",
+  "required": ["id", "query", "answerable", "class", "criticality", "relevance"],
+  "properties": {
+    "id": {"type": "string", "minLength": 1},
+    "query": {"type": "string", "minLength": 1},
+    "answerable": {"type": "boolean"},
+    "class": {"enum": ["direct", "paraphrase", "lexical", "multi_hop", "numeric", "table_figure", "multimodal", "metadata", "temporal_version", "conflict", "hard_negative", "ambiguous", "unanswerable", "regression"]},
+    "criticality": {"enum": ["normal", "high", "critical"]},
+    "relevance": {"type": "object", "additionalProperties": {"type": "number", "minimum": 0}},
+    "reference_answer": {"type": ["string", "null"]},
+    "notes": {"type": ["string", "null"]}
+  },
+  "additionalProperties": true
+}
