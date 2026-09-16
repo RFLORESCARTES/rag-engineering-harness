@@ -27,7 +27,7 @@ class HarnessTests(unittest.TestCase):
         self.temp.cleanup()
 
     def test_config_validates(self):
-        self.assertEqual(load_config(self.work / "rag_harness.yaml")["version"], "0.1.0")
+        self.assertEqual(load_config(self.work / "rag_harness.yaml")["version"], "0.3.0")
 
     def test_smoke_fixture_passes(self):
         metrics = evaluate(self.work / "fixtures/gold.jsonl", self.work / "fixtures/run.jsonl", self.work / "rag_harness.yaml", self.work / "report")
@@ -53,6 +53,44 @@ class HarnessTests(unittest.TestCase):
         run.write_text(run.read_text().splitlines()[0] + "\n")
         with self.assertRaisesRegex(BlockedError, "missing="):
             evaluate(self.work / "fixtures/gold.jsonl", run, self.work / "rag_harness.yaml", self.work / "report")
+
+    def test_metrics_tampering_blocks_gate(self):
+        metrics = evaluate(self.work / "fixtures/gold.jsonl", self.work / "fixtures/run.jsonl", self.work / "rag_harness.yaml", self.work / "report")
+        metrics["metrics"]["citation_precision"] = 0.123456
+        with self.assertRaisesRegex(BlockedError, "differs from recomputation"):
+            gate(metrics, self.work / "rag_harness.yaml")
+
+    def test_required_manifest_blocks_when_absent(self):
+        config = self.work / "rag_harness.yaml"
+        data = json.loads(config.read_text())
+        data["evaluation"]["require_corpus_manifest"] = True
+        config.write_text(json.dumps(data))
+        with self.assertRaisesRegex(BlockedError, "manifest"):
+            evaluate(self.work / "fixtures/gold.jsonl", self.work / "fixtures/run.jsonl", config, self.work / "report")
+
+    def test_manifest_mutation_blocks_gate(self):
+        manifest = self.work / "corpus_manifest.jsonl"
+        manifest.write_text("".join(json.dumps({"doc_id": doc}) + "\n" for doc in ("geo-fr-1", "spec-status", "readme-status", "ir-mrr")))
+        metrics = evaluate(self.work / "fixtures/gold.jsonl", self.work / "fixtures/run.jsonl", self.work / "rag_harness.yaml", self.work / "report", manifest)
+        manifest.write_text(manifest.read_text() + '{"doc_id":"changed"}\n')
+        with self.assertRaisesRegex(BlockedError, "corpus_manifest changed"):
+            gate(metrics, self.work / "rag_harness.yaml")
+
+    def test_enterprise_profile_passes_authorized_run(self):
+        config = ROOT / "profiles" / "r2-confidential.json"
+        metrics = evaluate(self.work / "fixtures/enterprise_gold.jsonl", self.work / "fixtures/enterprise_run_pass.jsonl", config, self.work / "enterprise-pass")
+        result = gate(metrics, config)
+        self.assertEqual(result["verdict"], "PASS")
+        self.assertEqual(result["dimensions"]["authorization"], "PASS")
+        self.assertEqual(result["dimensions"]["privacy_security"], "PASS")
+
+    def test_enterprise_profile_fails_cross_tenant_leak(self):
+        config = ROOT / "profiles" / "r2-confidential.json"
+        metrics = evaluate(self.work / "fixtures/enterprise_gold.jsonl", self.work / "fixtures/enterprise_run_leak.jsonl", config, self.work / "enterprise-leak")
+        result = gate(metrics, config)
+        self.assertEqual(result["verdict"], "FAIL")
+        self.assertEqual(result["dimensions"]["privacy_security"], "FAIL")
+        self.assertGreater(metrics["metrics"]["critical_security_failures"], 0)
 
 
 if __name__ == "__main__":

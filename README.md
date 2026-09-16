@@ -4,7 +4,7 @@ Framework-agnostic, deterministic-first harness for empirical validation,
 diagnosis, controlled optimization, regression testing, and release gating of
 Retrieval-Augmented Generation (RAG) systems.
 
-**Version:** 0.1.0 (V1 foundation)
+**Version:** 0.3.0
 
 ## What this repository does
 
@@ -13,6 +13,12 @@ stack can use any database, embedding model, reranker, LLM, graph, or framework;
 an adapter only needs to export canonical JSONL. The harness itself makes no API
 calls and the included smoke test requires no keys, network, embeddings, or paid
 models.
+
+Version 0.3 can freeze a corpus manifest, evaluate citations at evidence-locator
+level, and recomputes gate metrics from the recorded immutable inputs so an
+edited `metrics.json` becomes `BLOCKED`. Risk profiles R0-R3 add deterministic
+enterprise authorization, audit, cross-tenant leakage, forbidden-output, and
+mandatory-human-approval gates without asking the LLM to police itself.
 
 ## Design principles
 
@@ -28,7 +34,19 @@ models.
 
 ## Lifecycle
 
-`INIT -> AUDIT -> GOLD SET -> BASELINE -> EVALUATE -> DIAGNOSE -> EXPERIMENT -> REGRESSION -> RELEASE GATE`
+`INTAKE -> RISK -> AUDIT -> GOLD SET -> BASELINE -> EVALUATE -> ATTACK -> DIAGNOSE -> EXPERIMENT -> REGRESSION -> RELEASE GATE -> HUMAN APPROVAL`
+
+## Risk profiles
+
+| Profile | Intended use | Additional release behavior |
+|---|---|---|
+| R0 | Public or synthetic | IR, evidence, integrity, operations |
+| R1 | Internal non-confidential | Project-specific access and audit controls |
+| R2 | Confidential, contractual, personal, or multi-tenant | Authorization, audit completeness, zero critical leakage |
+| R3 | Regulated or high-impact | R2 controls, content hashes, evidence citations, mandatory human approval |
+
+Use `profiles/r2-confidential.json` or `profiles/r3-regulated.json` as strict
+starting points. Do not weaken them after observing failures.
 
 ## Quick start
 
@@ -90,6 +108,11 @@ Each line of a run is one JSON object:
 
 See `schemas/run.schema.json` for the machine-readable contract.
 
+R2-R3 runs additionally declare `decision` plus an `audit` object. Enterprise
+gold cases declare `expected_action`, `forbidden_doc_ids`, and optional
+`forbidden_output_markers`. A forbidden document entering retrieved context is
+a critical failure even if it is omitted from the final answer.
+
 ## Metrics and integrity
 
 The evaluator computes Hit@K, Recall@K, Precision@K, MRR@K, nDCG@K, citation
@@ -120,7 +143,9 @@ A high average never overrides a critical blocker.
 - `schemas/`: canonical gold, run, metrics, and experiment contracts.
 - `src/rag_harness/`: evaluator, integrity verifier, gate, and CLI.
 - `tests/fixtures/`: passing and failing deterministic benchmarks.
-- `protocols/`: audit, evaluation, diagnosis, experiment, and release procedures.
+- `profiles/`: risk-calibrated R2 and R3 configurations.
+- `prompts/`: adapter and controlled-diagnosis prompts.
+- `protocols/`: intake, audit, evaluation, diagnosis, security, experiment, and release procedures.
 
 ## Methodological boundary
 

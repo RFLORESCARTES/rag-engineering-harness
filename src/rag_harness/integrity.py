@@ -27,14 +27,20 @@ def evaluator_hash() -> str:
     return digest.hexdigest()
 
 
-def snapshot(gold: Path, run: Path, config: Path) -> dict:
+def snapshot(gold: Path, run: Path, config: Path, corpus_manifest: Path | None = None) -> dict:
+    files = {
+        "gold": {"path": str(gold.resolve()), "sha256": sha256_file(gold)},
+        "run": {"path": str(run.resolve()), "sha256": sha256_file(run)},
+        "config": {"path": str(config.resolve()), "sha256": sha256_file(config)},
+    }
+    if corpus_manifest is not None:
+        files["corpus_manifest"] = {
+            "path": str(corpus_manifest.resolve()),
+            "sha256": sha256_file(corpus_manifest),
+        }
     return {
         "algorithm": "sha256",
-        "files": {
-            "gold": {"path": str(gold.resolve()), "sha256": sha256_file(gold)},
-            "run": {"path": str(run.resolve()), "sha256": sha256_file(run)},
-            "config": {"path": str(config.resolve()), "sha256": sha256_file(config)},
-        },
+        "files": files,
         "evaluator": {
             "path": str(Path(__file__).resolve().parent),
             "sha256": evaluator_hash(),

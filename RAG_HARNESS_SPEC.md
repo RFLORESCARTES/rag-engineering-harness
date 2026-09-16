@@ -1,4 +1,4 @@
-# RAG Engineering Harness V1 — Normative Specification
+# RAG Engineering Harness V0.3 — Normative Specification
 
 The keywords **MUST**, **MUST NOT**, **SHOULD**, and **MAY** are normative.
 
@@ -12,7 +12,7 @@ contract; the evaluator then computes deterministic metrics and a release gate.
 
 `INIT -> AUDIT -> GOLD_SET -> BASELINE -> EVALUATE -> DIAGNOSE -> EXPERIMENT -> REGRESSION -> RELEASE_GATE`
 
-V1 directly automates configuration validation, deterministic evaluation,
+V0.3 directly automates configuration validation, deterministic evaluation,
 contract-integrity recording, and release gating. The remaining phases have
 operational protocols in `protocols/`.
 
@@ -30,6 +30,20 @@ operational protocols in `protocols/`.
    `BLOCKED: EVALUATION_CONTRACT_MUTATED`.
 9. Agents MUST NOT change gold data, thresholds, evaluator code, fixtures, or
    stop conditions to obtain a favorable outcome.
+10. `gate` MUST recompute decision evidence from the recorded inputs. Editable
+    metric values MUST NOT be trusted. A mismatch causes
+    `BLOCKED: METRICS_INTEGRITY_FAILURE`.
+11. When `require_corpus_manifest` is enabled, the manifest MUST be present,
+    hash-stable, and contain every document referenced by the gold set.
+12. When `citation_level` is `evidence`, citations MUST identify annotated
+    evidence records rather than documents only.
+13. Every evaluation MUST declare a risk profile R0-R3. Unknown risk MUST NOT
+    be silently interpreted as R0.
+14. R2-R3 runs MUST declare a decision and audit evidence. Gold cases MUST
+    declare expected actions for authorization tests.
+15. Retrieval of a forbidden document or emission of a forbidden marker is a
+    critical security failure and MUST NOT be offset by aggregate quality.
+16. An R3 automated PASS MUST become BLOCKED pending recorded human approval.
 
 ## Metrics
 
@@ -41,9 +55,9 @@ Binary relevance is derived from
 grades for nDCG. It also computes citation precision, citation recall,
 abstention accuracy, p95 latency, and mean cost.
 
-Citation precision is the proportion of cited document IDs that are relevant.
-Citation recall is the proportion of relevant IDs cited. These are evidence-ID
-metrics, not semantic faithfulness judgments.
+Citation precision and recall operate on document IDs or evidence IDs according
+to `evaluation.citation_level`. Evidence IDs identify a document locator, but
+V0.3 still does not claim semantic entailment of the cited text.
 
 ## Status
 
@@ -63,7 +77,7 @@ are blockers.
 
 ## Known boundary
 
-V1 does not claim semantic answer correctness, entailment, chunk-quality,
+V0.3 does not claim semantic answer correctness, entailment, chunk-quality,
 fairness, or production representativeness. Such evidence requires additional
-adapters and validated judge protocols. A V1 `PASS` means only that the declared
+adapters and validated judge protocols. A V0.3 `PASS` means only that the declared
 deterministic contract passed on the supplied benchmark.

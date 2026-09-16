@@ -27,6 +27,20 @@ def gate(metrics: dict[str, Any], config_path: Path, output_path: Path | None = 
     recorded_config = metrics["integrity"]["before"]["files"]["config"]
     if str(config_path.resolve()) != recorded_config["path"] or sha256_file(config_path) != recorded_config["sha256"]:
         raise BlockedError("EVALUATION_CONTRACT_MUTATED", "gate configuration differs from evaluated configuration")
+    # Never trust an editable metrics artifact. Recompute from the immutable
+    # paths recorded by evaluate and compare the complete decision evidence.
+    from tempfile import TemporaryDirectory
+    from .evaluator import evaluate
+    files = metrics["integrity"]["before"]["files"]
+    manifest = Path(files["corpus_manifest"]["path"]) if "corpus_manifest" in files else None
+    with TemporaryDirectory() as temp:
+        recomputed = evaluate(
+            Path(files["gold"]["path"]), Path(files["run"]["path"]),
+            config_path, Path(temp), manifest,
+        )
+    for field in ("query_count", "metrics", "per_query"):
+        if metrics.get(field) != recomputed.get(field):
+            raise BlockedError("METRICS_INTEGRITY_FAILURE", f"metrics artifact field {field} differs from recomputation")
     primary = str(config["evaluation"]["primary_k"])
     retrieval = metrics.get("metrics", {}).get("retrieval", {}).get(primary)
     if not retrieval:
@@ -49,8 +63,33 @@ def gate(metrics: dict[str, Any], config_path: Path, output_path: Path | None = 
     for name, limit in config["limits"].items():
         value = limit_mapping[name]
         checks.append({"name": name, "observed": value, "operator": "<=", "required": limit, "passed": value <= limit})
+    risk = config.get("risk_profile", "R0")
+    dimensions = {
+        "retrieval": "PASS" if all(c["passed"] for c in checks if c["name"] in {"hit_rate_at_k", "recall_at_k", "mrr_at_k", "ndcg_at_k"}) else "FAIL",
+        "evidence": "PASS" if all(c["passed"] for c in checks if c["name"] in {"citation_precision", "citation_recall"}) else "FAIL",
+        "operations": "PASS" if all(c["passed"] for c in checks if c["name"] in {"p95_latency_ms", "mean_cost_usd"}) else "FAIL",
+        "authorization": "NOT_EVALUATED",
+        "privacy_security": "NOT_EVALUATED",
+    }
+    if risk in {"R2", "R3"}:
+        enterprise = config["enterprise"]
+        enterprise_checks = [
+            {"name": "authorization_accuracy", "observed": observed["authorization_accuracy"], "operator": ">=", "required": enterprise["authorization_accuracy"], "passed": observed["authorization_accuracy"] is not None and observed["authorization_accuracy"] >= enterprise["authorization_accuracy"]},
+            {"name": "audit_completeness", "observed": observed["audit_completeness"], "operator": ">=", "required": enterprise["audit_completeness"], "passed": observed["audit_completeness"] is not None and observed["audit_completeness"] >= enterprise["audit_completeness"]},
+            {"name": "critical_security_failures", "observed": observed["critical_security_failures"], "operator": "<=", "required": enterprise["max_critical_security_failures"], "passed": observed["critical_security_failures"] <= enterprise["max_critical_security_failures"]},
+        ]
+        checks.extend(enterprise_checks)
+        dimensions["authorization"] = "PASS" if enterprise_checks[0]["passed"] else "FAIL"
+        dimensions["privacy_security"] = "PASS" if all(c["passed"] for c in enterprise_checks[1:]) else "FAIL"
     verdict = "PASS" if all(c["passed"] for c in checks) else "FAIL"
-    result = {"schema_version": "1.0", "verdict": verdict, "checks": checks, "blockers": []}
+    if risk == "R3" and verdict == "PASS":
+        verdict = "BLOCKED"
+        dimensions["human_approval"] = "REQUIRED"
+        blockers = ["HUMAN_APPROVAL_REQUIRED"]
+    else:
+        dimensions["human_approval"] = "NOT_REQUIRED" if risk != "R3" else "REQUIRED"
+        blockers = []
+    result = {"schema_version": "3.0", "risk_profile": risk, "verdict": verdict, "dimensions": dimensions, "checks": checks, "blockers": blockers}
     if output_path:
         dump_json(output_path, result)
     return result

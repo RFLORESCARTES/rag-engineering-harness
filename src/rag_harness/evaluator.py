@@ -34,6 +34,23 @@ def _validate_gold(row: dict[str, Any]) -> None:
     grades = row.get("graded_relevance", {})
     if not isinstance(grades, dict) or any(not isinstance(v, (int, float)) or isinstance(v, bool) or not math.isfinite(v) or v < 0 for v in grades.values()):
         raise BlockedError("INVALID_GOLD_SET", "graded_relevance must contain finite non-negative values")
+    evidence = row.get("evidence", [])
+    if not isinstance(evidence, list):
+        raise BlockedError("INVALID_GOLD_SET", "evidence must be a list")
+    evidence_ids = []
+    for item in evidence:
+        if not isinstance(item, dict) or not isinstance(item.get("evidence_id"), str) or not isinstance(item.get("doc_id"), str):
+            raise BlockedError("INVALID_GOLD_SET", "evidence items need string evidence_id and doc_id")
+        evidence_ids.append(item["evidence_id"])
+    if len(evidence_ids) != len(set(evidence_ids)):
+        raise BlockedError("INVALID_GOLD_SET", "evidence IDs must be unique per query")
+    expected_action = row.get("expected_action")
+    if expected_action is not None and expected_action not in {"ANSWER", "ABSTAIN_INSUFFICIENT_EVIDENCE", "ABSTAIN_CONFLICTING_EVIDENCE", "DENY_ACCESS", "DENY_CROSS_TENANT", "DENY_PURPOSE", "BLOCKED_STALE_POLICY"}:
+        raise BlockedError("INVALID_GOLD_SET", "invalid expected_action")
+    for field in ("forbidden_doc_ids", "forbidden_output_markers"):
+        value = row.get(field, [])
+        if not isinstance(value, list) or any(not isinstance(x, str) or not x for x in value):
+            raise BlockedError("INVALID_GOLD_SET", f"{field} must be a list of non-empty strings")
 
 
 def _validate_run(row: dict[str, Any], require_provenance: bool) -> None:
@@ -62,19 +79,50 @@ def _validate_run(row: dict[str, Any], require_provenance: bool) -> None:
             raise BlockedError("MISSING_PROVENANCE", "provenance needs system, run_id, and created_at")
 
 
+def _validate_enterprise_run(row: dict[str, Any]) -> None:
+    if row.get("decision") not in {"ANSWER", "ABSTAIN_INSUFFICIENT_EVIDENCE", "ABSTAIN_CONFLICTING_EVIDENCE", "DENY_ACCESS", "DENY_CROSS_TENANT", "DENY_PURPOSE", "BLOCKED_STALE_POLICY", "BLOCKED_SYSTEM_FAILURE"}:
+        raise BlockedError("INVALID_RUN", "enterprise run requires a valid decision")
+    audit = row.get("audit")
+    if not isinstance(audit, dict):
+        raise BlockedError("MISSING_AUDIT_EVIDENCE", "enterprise run requires audit evidence")
+
+
 def _dcg(grades: list[float]) -> float:
     return sum(g / math.log2(i + 2) for i, g in enumerate(grades))
 
 
-def evaluate(gold_path: Path, run_path: Path, config_path: Path, out_dir: Path) -> dict:
-    before = snapshot(gold_path, run_path, config_path)
+def evaluate(gold_path: Path, run_path: Path, config_path: Path, out_dir: Path, corpus_manifest: Path | None = None) -> dict:
     config = load_config(config_path)
+    if config["evaluation"].get("require_corpus_manifest", False) and corpus_manifest is None:
+        raise BlockedError("MISSING_CORPUS_MANIFEST", "a corpus manifest is required by configuration")
+    before = snapshot(gold_path, run_path, config_path, corpus_manifest)
     gold = _unique_ids(load_jsonl(gold_path), "gold")
     run = _unique_ids(load_jsonl(run_path), "run")
+    manifest_ids: set[str] | None = None
+    if corpus_manifest is not None:
+        manifest_rows = load_jsonl(corpus_manifest)
+        ids = [row.get("doc_id") for row in manifest_rows]
+        if any(not isinstance(x, str) or not x for x in ids) or len(ids) != len(set(ids)):
+            raise BlockedError("INVALID_CORPUS_MANIFEST", "manifest doc_id values must be non-empty and unique")
+        manifest_ids = set(ids)
+        if config["evaluation"].get("require_content_hashes", False):
+            for row in manifest_rows:
+                digest = row.get("sha256")
+                if not isinstance(digest, str) or len(digest) != 64:
+                    raise BlockedError("MISSING_CORPUS_HASH", f"{row['doc_id']}: valid sha256 is required")
     for row in gold.values():
         _validate_gold(row)
+        if config["evaluation"].get("require_evidence", False) and row.get("answerable", True) and not row.get("evidence"):
+            raise BlockedError("MISSING_EVIDENCE", f"{row['query_id']}: answerable query has no evidence records")
+        if manifest_ids is not None:
+            unknown_docs = set(row["relevant_doc_ids"]) - manifest_ids
+            unknown_evidence_docs = {x["doc_id"] for x in row.get("evidence", [])} - manifest_ids
+            if unknown_docs or unknown_evidence_docs:
+                raise BlockedError("CORPUS_REFERENCE_MISMATCH", f"{row['query_id']}: unknown corpus documents {sorted(unknown_docs | unknown_evidence_docs)}")
     for row in run.values():
         _validate_run(row, bool(config["evaluation"].get("require_provenance", True)))
+        if config.get("risk_profile", "R0") in {"R2", "R3"}:
+            _validate_enterprise_run(row)
     missing = sorted(gold.keys() - run.keys())
     unknown = sorted(run.keys() - gold.keys())
     if unknown or (missing and config["evaluation"].get("require_complete_query_set", True)):
@@ -83,6 +131,8 @@ def evaluate(gold_path: Path, run_path: Path, config_path: Path, out_dir: Path) 
     ks = config["evaluation"]["k_values"]
     accum = {k: {m: [] for m in ("hit_rate", "recall", "precision", "mrr", "ndcg")} for k in ks}
     citation_precision, citation_recall, abstention, latency, cost, per_query = [], [], [], [], [], []
+    authorization, audit_scores = [], []
+    cross_tenant_leakage_count = forbidden_output_count = 0
     for qid, expected in gold.items():
         actual = run[qid]
         relevant = set(expected["relevant_doc_ids"])
@@ -108,13 +158,33 @@ def evaluate(gold_path: Path, run_path: Path, config_path: Path, out_dir: Path) 
                     accum[k][name].append(value)
         else:
             q_metrics["not_applicable"] = "unanswerable_query"
+        citation_level = config["evaluation"].get("citation_level", "document")
+        if citation_level == "evidence":
+            expected_citations = {x["evidence_id"] for x in expected.get("evidence", [])}
+        else:
+            expected_citations = relevant
         citations = set(actual.get("citations", []))
-        citation_precision.append(len(citations & relevant) / len(citations) if citations else float(not relevant))
-        citation_recall.append(len(citations & relevant) / len(relevant) if relevant else float(not citations))
+        citation_precision.append(len(citations & expected_citations) / len(citations) if citations else float(not expected_citations))
+        citation_recall.append(len(citations & expected_citations) / len(expected_citations) if expected_citations else float(not citations))
         abstention.append(float(actual["abstained"] == (not expected["answerable"])))
+        expected_action = expected.get("expected_action")
+        if expected_action is not None:
+            authorization.append(float(actual.get("decision") == expected_action))
+        forbidden_docs = set(expected.get("forbidden_doc_ids", []))
+        leaked_docs = sorted(forbidden_docs & set(ranked))
+        cross_tenant_leakage_count += len(leaked_docs)
+        answer_text = actual.get("answer", "")
+        if not isinstance(answer_text, str):
+            raise BlockedError("INVALID_RUN", "answer must be a string when present")
+        matched_markers = [marker for marker in expected.get("forbidden_output_markers", []) if marker.casefold() in answer_text.casefold()]
+        forbidden_output_count += len(matched_markers)
+        if config.get("risk_profile", "R0") in {"R2", "R3"}:
+            audit = actual.get("audit", {})
+            mandatory_audit = ("actor_id", "tenant_id", "policy_id", "decision_id", "timestamp")
+            audit_scores.append(sum(bool(audit.get(field)) for field in mandatory_audit) / len(mandatory_audit))
         latency.append(float(actual["latency_ms"]))
         cost.append(float(actual["cost_usd"]))
-        per_query.append({"query_id": qid, "retrieval": q_metrics})
+        per_query.append({"query_id": qid, "retrieval": q_metrics, "security": {"expected_action": expected_action, "observed_action": actual.get("decision"), "forbidden_documents_retrieved": leaked_docs, "forbidden_output_markers": matched_markers}})
 
     aggregate = {}
     for k in ks:
@@ -122,7 +192,7 @@ def evaluate(gold_path: Path, run_path: Path, config_path: Path, out_dir: Path) 
     ordered_latency = sorted(latency)
     p95_index = max(0, math.ceil(0.95 * len(ordered_latency)) - 1)
     metrics = {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "status": "EVALUATED",
         "query_count": len(gold),
         "metrics": {
@@ -132,11 +202,16 @@ def evaluate(gold_path: Path, run_path: Path, config_path: Path, out_dir: Path) 
             "abstention_accuracy": statistics.fmean(abstention),
             "p95_latency_ms": ordered_latency[p95_index],
             "mean_cost_usd": statistics.fmean(cost),
+            "authorization_accuracy": statistics.fmean(authorization) if authorization else None,
+            "audit_completeness": statistics.fmean(audit_scores) if audit_scores else None,
+            "cross_tenant_leakage_count": cross_tenant_leakage_count,
+            "forbidden_output_count": forbidden_output_count,
+            "critical_security_failures": cross_tenant_leakage_count + forbidden_output_count,
         },
         "per_query": per_query,
         "integrity": {"before": before},
     }
-    after = snapshot(gold_path, run_path, config_path)
+    after = snapshot(gold_path, run_path, config_path, corpus_manifest)
     metrics["integrity"]["after"] = after
     if before != after:
         raise BlockedError("EVALUATION_CONTRACT_MUTATED", "evaluation inputs or evaluator changed during execution")

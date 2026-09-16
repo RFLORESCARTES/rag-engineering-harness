@@ -1,0 +1,18 @@
+{
+  "version": "0.3.0",
+  "risk_profile": "R3",
+  "evaluation": {
+    "k_values": [1, 3, 5], "primary_k": 3,
+    "require_complete_query_set": true, "require_provenance": true,
+    "citation_level": "evidence", "require_evidence": true,
+    "require_corpus_manifest": true, "require_content_hashes": true
+  },
+  "thresholds": {
+    "hit_rate_at_k": 0.90, "recall_at_k": 0.90, "mrr_at_k": 0.85,
+    "ndcg_at_k": 0.85, "citation_precision": 0.95,
+    "citation_recall": 0.95, "abstention_accuracy": 1.0
+  },
+  "limits": {"p95_latency_ms": 3000.0, "mean_cost_usd": 0.10},
+  "enterprise": {"authorization_accuracy": 1.0, "audit_completeness": 1.0, "max_critical_security_failures": 0},
+  "integrity": {"algorithm": "sha256", "require_stable_inputs": true, "require_evaluator_hash": true}
+}
