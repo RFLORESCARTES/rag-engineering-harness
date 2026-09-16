@@ -1,0 +1,42 @@
+version: "0.1.0"
+project:
+  name: example-rag
+  environment: evaluation
+
+mode: FULL
+
+cutoffs: [1, 3, 5, 10]
+primary_cutoff: 10
+
+policies:
+  deterministic_first: true
+  diagnose_before_optimize: true
+  freeze_gold_during_run: true
+  one_primary_variable_per_experiment: true
+  block_on_benchmark_mutation: true
+  block_on_evaluator_mutation: true
+  block_on_critical_hallucination: true
+
+release_gate:
+  retrieval:
+    hit_rate_at_k: 0.90
+    recall_at_k: 0.90
+    mrr_at_k: 0.80
+    ndcg_at_k: 0.80
+  regression:
+    pass_rate: 1.00
+  abstention:
+    unanswerable_safe_rate: 0.95
+  operations:
+    p95_latency_ms: null
+    max_cost_per_query: null
+
+paths:
+  gold: tests/fixtures/gold.jsonl
+  run: tests/fixtures/run.jsonl
+  reports: reports/latest
+  experiment_ledger: experiments/ledger.jsonl
+
+adapter:
+  type: canonical_jsonl
+  notes: "Transform stack-specific output to the canonical run schema."
