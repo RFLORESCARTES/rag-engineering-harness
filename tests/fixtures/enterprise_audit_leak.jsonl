@@ -1,2 +1,2 @@
-{"query_id":"ent-1","actor_id":"user-a","tenant_id":"tenant-a","policy_id":"policy-1","decision_id":"decision-1","decision":"ANSWER"}
-{"query_id":"ent-2","actor_id":"user-a","tenant_id":"tenant-a","policy_id":"policy-1","decision_id":"decision-2","decision":"ANSWER"}
+{"query_id":"ent-1","actor_id":"user-a","tenant_id":"tenant-a","policy_id":"policy-1","decision_id":"decision-1","decision":"ANSWER","timestamp":"2026-09-16T00:00:00Z","run_id":"leak","system":"enterprise-fixture"}
+{"query_id":"ent-2","actor_id":"user-a","tenant_id":"tenant-a","policy_id":"policy-1","decision_id":"decision-2","decision":"ANSWER","timestamp":"2026-09-16T00:00:01Z","run_id":"leak","system":"enterprise-fixture"}

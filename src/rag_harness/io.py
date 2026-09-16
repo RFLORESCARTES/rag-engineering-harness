@@ -39,6 +39,9 @@ def validate_config(config: dict[str, Any]) -> None:
         raise HarnessError("evaluation.primary_k must occur in k_values")
     if ev.get("citation_level", "document") not in {"document", "evidence"}:
         raise HarnessError("evaluation.citation_level must be document or evidence")
+    coverage = ev.get("minimum_query_coverage", 1.0)
+    if not isinstance(coverage, (int, float)) or isinstance(coverage, bool) or not math.isfinite(coverage) or not 0 <= coverage <= 1:
+        raise HarnessError("evaluation.minimum_query_coverage must be within [0, 1]")
     for flag in ("require_complete_query_set", "require_provenance", "require_evidence", "require_corpus_manifest", "require_content_hashes"):
         if flag in ev and not isinstance(ev[flag], bool):
             raise HarnessError(f"evaluation.{flag} must be boolean")

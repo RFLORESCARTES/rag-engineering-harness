@@ -56,9 +56,13 @@ rag-harness gate --metrics REPORT_DIR/metrics.json \
 
 Do not call `gate` on hand-authored metrics. The gate recomputes decision
 evidence and blocks any mismatch.
-For R2-R3, require the trust-anchor SHA-256 from a protected source outside the
+For R1-R3, require the trust-anchor SHA-256 from a protected source outside the
 evaluated checkout. An anchor and digest both writable by the evaluated agent
 do not establish trust.
+Treat incomplete query coverage and missing tenant/access metadata as gate
+failures or blockers, never as permission to score only the favorable subset.
+Report the complete `gate.json.trust` provenance and never reinterpret its
+`production_authorized: false` field as a release approval.
 
 ## Fail fast and report
 

@@ -47,7 +47,7 @@ class HarnessTests(unittest.TestCase):
         return config, gold, manifest, audit_log, anchor, sha256_file(anchor)
 
     def test_config_validates(self):
-        self.assertEqual(load_config(self.work / "rag_harness.yaml")["version"], "0.4.0")
+        self.assertEqual(load_config(self.work / "rag_harness.yaml")["version"], "0.4.1")
 
     def test_smoke_fixture_passes(self):
         metrics = evaluate(self.work / "fixtures/gold.jsonl", self.work / "fixtures/run.jsonl", self.work / "rag_harness.yaml", self.work / "report")
@@ -142,6 +142,57 @@ class HarnessTests(unittest.TestCase):
         metrics = evaluate(self.work / "fixtures/gold.jsonl", run, config, self.work / "partial")
         self.assertEqual(metrics["evaluated_query_count"], 1)
         self.assertEqual(metrics["query_coverage"], 0.25)
+        result = gate(metrics, config)
+        self.assertEqual(result["verdict"], "FAIL")
+        self.assertFalse(next(c for c in result["checks"] if c["name"] == "query_coverage")["passed"])
+
+    def test_manifest_without_access_metadata_blocks_closed(self):
+        config, gold, manifest, audit_log, _, _ = self.enterprise_contract()
+        rows = [json.loads(line) for line in manifest.read_text().splitlines()]
+        rows[1].pop("tenant_id")
+        manifest.write_text("".join(json.dumps(row) + "\n" for row in rows))
+        anchor = self.work / "access-anchor.json"
+        anchor.write_text(json.dumps({
+            "schema_version": "1.0", "minimum_risk_profile": "R2", "issued_by": "test",
+            "approved": {"evaluator_sha256": evaluator_hash(), "gold_sha256": sha256_file(gold),
+                "config_sha256": sha256_file(config), "corpus_manifest_sha256": sha256_file(manifest),
+                "audit_log_sha256": sha256_file(audit_log)},
+        }))
+        with self.assertRaisesRegex(BlockedError, "require tenant_id"):
+            evaluate(gold, self.work / "fixtures/enterprise_run_pass.jsonl", config, self.work / "missing-access", manifest, anchor, sha256_file(anchor), audit_log)
+
+    def test_unicode_dash_cannot_evade_forbidden_marker(self):
+        config, gold, manifest, audit_log, anchor, digest = self.enterprise_contract("enterprise_audit_leak.jsonl")
+        run = self.work / "unicode-leak.jsonl"
+        run.write_text((self.work / "fixtures/enterprise_run_leak.jsonl").read_text().replace("SECRET-B", "SECRET\u2011B"))
+        metrics = evaluate(gold, run, config, self.work / "unicode", manifest, anchor, digest, audit_log)
+        self.assertGreater(metrics["metrics"]["forbidden_output_count"], 0)
+        self.assertEqual(gate(metrics, config, trust_anchor=anchor, trust_anchor_sha256=digest, audit_log=audit_log)["verdict"], "FAIL")
+
+    def test_external_audit_timestamp_and_provenance_are_bound(self):
+        config, gold, manifest, audit_log, _, _ = self.enterprise_contract()
+        audit_log.write_text(audit_log.read_text().replace("2026-09-16T00:00:00Z", "2026-09-16T00:00:09Z", 1))
+        _, _, _, _, anchor, digest = self.enterprise_contract()
+        with self.assertRaisesRegex(BlockedError, "not corroborated"):
+            evaluate(gold, self.work / "fixtures/enterprise_run_pass.jsonl", config, self.work / "audit-mismatch", manifest, anchor, digest, audit_log)
+
+    def test_identical_anchor_and_audit_are_portable_across_paths(self):
+        config, gold, manifest, audit_log, anchor, digest = self.enterprise_contract()
+        metrics = evaluate(gold, self.work / "fixtures/enterprise_run_pass.jsonl", config, self.work / "portable", manifest, anchor, digest, audit_log)
+        anchor_copy = self.work / "job-two-anchor.json"
+        audit_copy = self.work / "job-two-audit.jsonl"
+        shutil.copy2(anchor, anchor_copy)
+        shutil.copy2(audit_log, audit_copy)
+        result = gate(metrics, config, trust_anchor=anchor_copy, trust_anchor_sha256=digest, audit_log=audit_copy)
+        self.assertEqual(result["verdict"], "PASS")
+        self.assertEqual(result["trust"]["anchor_sha256"], digest)
+        self.assertEqual(result["trust"]["level"], "EXTERNALLY_PINNED_INPUTS")
+
+    def test_gate_reports_self_attested_scope_for_r0(self):
+        metrics = evaluate(self.work / "fixtures/gold.jsonl", self.work / "fixtures/run.jsonl", self.work / "rag_harness.yaml", self.work / "trust-report")
+        result = gate(metrics, self.work / "rag_harness.yaml")
+        self.assertEqual(result["trust"]["level"], "SELF_ATTESTED")
+        self.assertFalse(result["trust"]["production_authorized"])
 
     def test_zero_grade_for_relevant_document_blocks(self):
         gold = self.work / "fixtures/gold.jsonl"

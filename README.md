@@ -4,7 +4,7 @@ Framework-agnostic, deterministic-first harness for empirical validation,
 diagnosis, controlled optimization, regression testing, and release gating of
 Retrieval-Augmented Generation (RAG) systems.
 
-**Version:** 0.4.0
+**Version:** 0.4.1
 
 ## What this repository does
 
@@ -14,17 +14,19 @@ an adapter only needs to export canonical JSONL. The harness itself makes no API
 calls and the included smoke test requires no keys, network, embeddings, or paid
 models.
 
-Version 0.4 can freeze a corpus manifest, evaluate citations at evidence-locator
+Version 0.4.1 can freeze a corpus manifest, evaluate citations at evidence-locator
 level, and recomputes gate metrics from the recorded immutable inputs so an
 edited `metrics.json` becomes `BLOCKED`. Risk profiles R0-R3 add deterministic
 enterprise authorization, audit, cross-tenant leakage, forbidden-output, and
 mandatory-human-approval gates without asking the LLM to police itself.
 
-R2-R3 additionally require an external trust root. A trust anchor approves the
+R1-R3 additionally require an external trust root. A trust anchor approves the
 evaluator, gold, risk configuration, corpus manifest, and independent audit log;
 its SHA-256 MUST be supplied from outside the evaluated checkout. This prevents
 a modified evaluator, substituted gold, or profile downgrade from approving
-itself through internally consistent hashes.
+itself through internally consistent hashes only when the digest and runtime
+are actually controlled outside the evaluated process. The harness cannot prove
+that externality itself; `gate.json` records the trust inputs and this limitation.
 
 ## Design principles
 
@@ -47,14 +49,14 @@ itself through internally consistent hashes.
 | Profile | Intended use | Additional release behavior |
 |---|---|---|
 | R0 | Public or synthetic | IR, evidence, integrity, operations |
-| R1 | Internal non-confidential | Project-specific access and audit controls |
+| R1 | Internal non-confidential | Corpus access metadata and externally pinned contract |
 | R2 | Confidential, contractual, personal, or multi-tenant | Authorization, audit completeness, zero critical leakage |
 | R3 | Regulated or high-impact | R2 controls, content hashes, evidence citations, mandatory human approval |
 
 Use `profiles/r2-confidential.json` or `profiles/r3-regulated.json` as strict
 starting points. Do not weaken them after observing failures.
 
-## External trust root for R2-R3
+## External trust root for R1-R3
 
 After independent review, create an approval candidate with
 `scripts/create_trust_anchor.py`. Store its printed SHA-256 in a protected CI
@@ -133,12 +135,16 @@ a critical failure even if it is omitted from the final answer.
 Tenant isolation is also derived from `tenant_id` in the corpus manifest and
 the independently corroborated audit identity; it does not depend solely on
 enumerating forbidden documents in the gold set.
+For R1-R3, every manifest document must declare a non-empty `tenant_id` or an
+explicit `scope: "SHARED"` with non-empty `allowed_tenants`; missing access
+metadata blocks closed. External audit matching binds timestamp, run, and system.
 
 ## Metrics and integrity
 
 The evaluator computes Hit@K, Recall@K, Precision@K, MRR@K, nDCG@K, citation
-precision/recall, abstention accuracy, p95 latency, and mean cost. It records
-SHA-256 hashes of the gold set, run, configuration, and evaluator code before
+precision/recall, abstention accuracy, p95 latency, mean cost, and query
+coverage. It gates coverage against `evaluation.minimum_query_coverage` and
+records SHA-256 hashes of the gold set, run, configuration, and evaluator code before
 and after evaluation. The gate rechecks those hashes. Mutation produces
 `BLOCKED: EVALUATION_CONTRACT_MUTATED` instead of a potentially false result.
 
@@ -150,11 +156,14 @@ dependencies.
 
 | Verdict | Meaning | Exit code |
 |---|---|---:|
-| `PASS` | Trustworthy evaluation and every mandatory gate passed | 0 |
+| `PASS` | The declared evaluation contract and every mandatory gate passed | 0 |
 | `FAIL` | Trustworthy evaluation completed, but a quality gate failed | 1 |
 | `BLOCKED` | Trustworthy evaluation could not be completed | 2 |
 
 A high average never overrides a critical blocker.
+`PASS` is not production authorization. Inspect the `trust` object in
+`gate.json`; v0.4.1 always reports `production_authorized: false` because a
+mutable process cannot attest its own runtime independence.
 
 ## Repository map
 

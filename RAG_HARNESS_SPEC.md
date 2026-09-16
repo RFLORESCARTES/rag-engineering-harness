@@ -1,4 +1,4 @@
-# RAG Engineering Harness V0.4 — Normative Specification
+# RAG Engineering Harness V0.4.1 — Normative Specification
 
 The keywords **MUST**, **MUST NOT**, **SHOULD**, and **MAY** are normative.
 
@@ -12,7 +12,7 @@ contract; the evaluator then computes deterministic metrics and a release gate.
 
 `INIT -> AUDIT -> GOLD_SET -> BASELINE -> EVALUATE -> DIAGNOSE -> EXPERIMENT -> REGRESSION -> RELEASE_GATE`
 
-V0.4 directly automates configuration validation, deterministic evaluation,
+V0.4.1 directly automates configuration validation, deterministic evaluation,
 contract-integrity recording, and release gating. The remaining phases have
 operational protocols in `protocols/`.
 
@@ -44,12 +44,21 @@ operational protocols in `protocols/`.
 15. Retrieval of a forbidden document or emission of a forbidden marker is a
     critical security failure and MUST NOT be offset by aggregate quality.
 16. An R3 automated PASS MUST become BLOCKED pending recorded human approval.
-17. R2-R3 MUST use an externally pinned trust-anchor digest. The anchor MUST
+17. R1-R3 MUST use an externally pinned trust-anchor digest. The anchor MUST
     approve evaluator, gold, configuration, corpus manifest, audit log, and
     minimum risk profile.
 18. Tenant leakage MUST be detected from trusted corpus and actor metadata even
     when the gold does not enumerate a forbidden document.
 19. Self-declared audit fields MUST NOT constitute their own attestation.
+20. Query coverage MUST be gated and MUST NOT be inferred from quality on a subset.
+21. R1-R3 corpus records MUST identify a tenant or an explicit shared allow-list;
+    absent access metadata MUST block closed.
+22. Security marker matching MUST normalize Unicode compatibility characters,
+    dash variants, formatting characters, case, and whitespace before comparison.
+23. External audit corroboration MUST bind query, actor, tenant, policy, decision,
+    timestamp, run identifier, and system identifier.
+24. Trust-anchor identity is its digest, not its filesystem path. Gate output MUST
+    record the anchor digest, expected digest, issuer, approvals, and limitation.
 
 ## Metrics
 
@@ -63,11 +72,11 @@ abstention accuracy, p95 latency, and mean cost.
 
 Citation precision and recall operate on document IDs or evidence IDs according
 to `evaluation.citation_level`. Evidence IDs identify a document locator, but
-V0.4 still does not claim semantic entailment of the cited text.
+V0.4.1 still does not claim semantic entailment of the cited text.
 
 ## Status
 
-- `PASS`: evaluation is trustworthy and all mandatory thresholds and limits pass.
+- `PASS`: the declared evaluation contract and all mandatory thresholds and limits pass.
 - `FAIL`: evaluation is trustworthy but at least one gate fails.
 - `BLOCKED`: trustworthy evaluation cannot be completed.
 
@@ -83,7 +92,10 @@ are blockers.
 
 ## Known boundary
 
-V0.4 does not claim semantic answer correctness, entailment, chunk-quality,
+V0.4.1 does not claim semantic answer correctness, entailment, chunk-quality,
 fairness, or production representativeness. Such evidence requires additional
-adapters and validated judge protocols. A V0.4 `PASS` means only that the declared
+adapters and validated judge protocols. A V0.4.1 `PASS` means only that the declared
 deterministic contract passed on the supplied benchmark.
+The evaluated process cannot prove that an anchor digest or runtime is controlled
+externally. Therefore automated output MUST NOT claim production authorization;
+R3 also remains BLOCKED until a human-approval mechanism exists.

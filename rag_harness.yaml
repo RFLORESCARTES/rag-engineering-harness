@@ -1,9 +1,10 @@
 {
-  "version": "0.4.0",
+  "version": "0.4.1",
   "risk_profile": "R0",
   "evaluation": {
     "k_values": [1, 3, 5],
     "primary_k": 3,
+    "minimum_query_coverage": 1.0,
     "require_complete_query_set": true,
     "require_provenance": true,
     "citation_level": "document",

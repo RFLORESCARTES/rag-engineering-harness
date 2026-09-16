@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import statistics
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -9,6 +10,25 @@ from .errors import BlockedError
 from .integrity import snapshot
 from .io import dump_json, load_config, load_jsonl
 from .trust import verify_trust_anchor
+
+
+def _security_text(value: str) -> str:
+    """Canonicalize common Unicode evasions before deterministic marker checks."""
+    normalized = unicodedata.normalize("NFKC", value)
+    normalized = "".join("-" if unicodedata.category(char) == "Pd" else char for char in normalized)
+    normalized = "".join(char for char in normalized if unicodedata.category(char) != "Cf")
+    return " ".join(normalized.casefold().split())
+
+
+def _validate_manifest_access(row: dict[str, Any]) -> None:
+    tenant = row.get("tenant_id")
+    allowed = row.get("allowed_tenants")
+    scope = row.get("scope")
+    if isinstance(tenant, str) and tenant.strip():
+        return
+    if scope == "SHARED" and isinstance(allowed, list) and allowed and all(isinstance(x, str) and x.strip() for x in allowed):
+        return
+    raise BlockedError("MISSING_ACCESS_METADATA", f"{row['doc_id']}: require tenant_id or explicit SHARED allowed_tenants")
 
 
 def _unique_ids(rows: list[dict[str, Any]], label: str) -> dict[str, dict[str, Any]]:
@@ -122,6 +142,9 @@ def evaluate(gold_path: Path, run_path: Path, config_path: Path, out_dir: Path, 
             raise BlockedError("INVALID_CORPUS_MANIFEST", "manifest doc_id values must be non-empty and unique")
         manifest_ids = set(ids)
         manifest_by_id = {row["doc_id"]: row for row in manifest_rows}
+        if config.get("risk_profile", "R0") in {"R1", "R2", "R3"}:
+            for row in manifest_rows:
+                _validate_manifest_access(row)
         if config["evaluation"].get("require_content_hashes", False):
             for row in manifest_rows:
                 digest = row.get("sha256")
@@ -143,8 +166,15 @@ def evaluate(gold_path: Path, run_path: Path, config_path: Path, out_dir: Path, 
             if config.get("enterprise", {}).get("require_external_audit", False):
                 observed_audit = row["audit"]
                 trusted_audit = audit_by_decision.get(observed_audit.get("decision_id"))
-                fields = ("query_id", "actor_id", "tenant_id", "policy_id", "decision_id", "decision")
-                if trusted_audit is None or any(trusted_audit.get(field) != (row.get("query_id") if field == "query_id" else row.get("decision") if field == "decision" else observed_audit.get(field)) for field in fields):
+                observed = {
+                    **observed_audit,
+                    "query_id": row.get("query_id"),
+                    "decision": row.get("decision"),
+                    "run_id": row.get("provenance", {}).get("run_id"),
+                    "system": row.get("provenance", {}).get("system"),
+                }
+                fields = ("query_id", "actor_id", "tenant_id", "policy_id", "decision_id", "decision", "timestamp", "run_id", "system")
+                if trusted_audit is None or any(trusted_audit.get(field) != observed.get(field) for field in fields):
                     raise BlockedError("AUDIT_ATTESTATION_MISMATCH", f"{row['query_id']}: run audit is not corroborated by trusted audit evidence")
     missing = sorted(gold.keys() - run.keys())
     unknown = sorted(run.keys() - gold.keys())
@@ -204,13 +234,19 @@ def evaluate(gold_path: Path, run_path: Path, config_path: Path, out_dir: Path, 
             unknown_retrieved = [doc for doc in ranked if doc not in manifest_by_id]
             if unknown_retrieved:
                 raise BlockedError("CORPUS_REFERENCE_MISMATCH", f"retrieved documents absent from manifest: {unknown_retrieved}")
-            tenant_leaks = [doc for doc in ranked if manifest_by_id[doc].get("tenant_id") not in {None, actor_tenant}]
+            tenant_leaks = []
+            for doc in ranked:
+                metadata = manifest_by_id[doc]
+                allowed = metadata.get("allowed_tenants", []) if metadata.get("scope") == "SHARED" else []
+                if metadata.get("tenant_id") != actor_tenant and actor_tenant not in allowed:
+                    tenant_leaks.append(doc)
             leaked_docs = sorted(set(leaked_docs) | set(tenant_leaks))
         cross_tenant_leakage_count += len(leaked_docs)
         answer_text = actual.get("answer", "")
         if not isinstance(answer_text, str):
             raise BlockedError("INVALID_RUN", "answer must be a string when present")
-        matched_markers = [marker for marker in expected.get("forbidden_output_markers", []) if marker.casefold() in answer_text.casefold()]
+        normalized_answer = _security_text(answer_text)
+        matched_markers = [marker for marker in expected.get("forbidden_output_markers", []) if _security_text(marker) in normalized_answer]
         forbidden_output_count += len(matched_markers)
         if config.get("risk_profile", "R0") in {"R2", "R3"}:
             audit = actual.get("audit", {})

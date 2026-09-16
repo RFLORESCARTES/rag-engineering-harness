@@ -5,3 +5,5 @@ Before release, rerun unit tests plus the frozen benchmark from a clean checkout
 Release only on `PASS`, with no blocker and an unchanged evaluation contract.
 `FAIL` requires quality work; `BLOCKED` requires restoring trustworthy evidence.
 A fixture PASS is a smoke test, not evidence of production readiness.
+Review `gate.json.trust`; `production_authorized: false` requires an independent
+release system to verify the pinned digest and trusted runtime before deployment.
