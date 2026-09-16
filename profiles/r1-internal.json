@@ -1,0 +1,7 @@
+{
+  "version": "0.4.0", "risk_profile": "R1",
+  "evaluation": {"k_values":[1,3,5],"primary_k":3,"require_complete_query_set":true,"require_provenance":true,"citation_level":"document","require_evidence":false,"require_corpus_manifest":true,"require_content_hashes":true},
+  "thresholds":{"hit_rate_at_k":0.80,"recall_at_k":0.75,"mrr_at_k":0.70,"ndcg_at_k":0.75,"citation_precision":0.80,"citation_recall":0.70,"abstention_accuracy":1.0},
+  "limits":{"p95_latency_ms":1500.0,"mean_cost_usd":0.01},
+  "integrity":{"algorithm":"sha256","require_stable_inputs":true,"require_evaluator_hash":true,"require_trust_anchor":false}
+}

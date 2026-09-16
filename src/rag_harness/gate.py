@@ -21,7 +21,7 @@ def _verify_integrity(metrics: dict[str, Any]) -> None:
         raise BlockedError("EVALUATOR_INTEGRITY_FAILURE", "evaluator code changed after evaluation")
 
 
-def gate(metrics: dict[str, Any], config_path: Path, output_path: Path | None = None) -> dict:
+def gate(metrics: dict[str, Any], config_path: Path, output_path: Path | None = None, trust_anchor: Path | None = None, trust_anchor_sha256: str | None = None, audit_log: Path | None = None) -> dict:
     _verify_integrity(metrics)
     config = load_config(config_path)
     recorded_config = metrics["integrity"]["before"]["files"]["config"]
@@ -33,12 +33,18 @@ def gate(metrics: dict[str, Any], config_path: Path, output_path: Path | None = 
     from .evaluator import evaluate
     files = metrics["integrity"]["before"]["files"]
     manifest = Path(files["corpus_manifest"]["path"]) if "corpus_manifest" in files else None
+    recorded_anchor = Path(files["trust_anchor"]["path"]) if "trust_anchor" in files else None
+    if (recorded_anchor.resolve() if recorded_anchor else None) != (trust_anchor.resolve() if trust_anchor else None):
+        raise BlockedError("TRUST_ANCHOR_MISMATCH", "gate trust anchor differs from evaluated trust anchor")
+    recorded_audit = Path(files["audit_log"]["path"]) if "audit_log" in files else None
+    if (recorded_audit.resolve() if recorded_audit else None) != (audit_log.resolve() if audit_log else None):
+        raise BlockedError("AUDIT_ATTESTATION_MISMATCH", "gate audit evidence differs from evaluated audit evidence")
     with TemporaryDirectory() as temp:
         recomputed = evaluate(
             Path(files["gold"]["path"]), Path(files["run"]["path"]),
-            config_path, Path(temp), manifest,
+            config_path, Path(temp), manifest, trust_anchor, trust_anchor_sha256, audit_log,
         )
-    for field in ("query_count", "metrics", "per_query"):
+    for field in ("query_count", "evaluated_query_count", "query_coverage", "metrics", "per_query"):
         if metrics.get(field) != recomputed.get(field):
             raise BlockedError("METRICS_INTEGRITY_FAILURE", f"metrics artifact field {field} differs from recomputation")
     primary = str(config["evaluation"]["primary_k"])

@@ -1,0 +1,2 @@
+{"doc_id":"tenant-a-contract","title":"Tenant A contract","mime_type":"application/pdf","size_bytes":100,"modified_time":"2026-09-16T00:00:00Z","sha256":"0000000000000000000000000000000000000000000000000000000000000000","tenant_id":"tenant-a","classification":"CONFIDENTIAL"}
+{"doc_id":"tenant-b-contract","title":"Tenant B contract","mime_type":"application/pdf","size_bytes":100,"modified_time":"2026-09-16T00:00:00Z","sha256":"1111111111111111111111111111111111111111111111111111111111111111","tenant_id":"tenant-b","classification":"CONFIDENTIAL"}

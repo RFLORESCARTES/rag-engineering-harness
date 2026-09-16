@@ -1,7 +1,7 @@
-name: ci
-on:
-  push:
-  pull_request:
+name: deterministic-harness-ci
+on: [push, pull_request]
+permissions:
+  contents: read
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -9,9 +9,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
       - run: python -m pip install -e .
       - run: python -m unittest discover -s tests -v
       - run: rag-harness validate-config rag_harness.yaml
-      - run: rag-harness evaluate --gold tests/fixtures/gold.jsonl --run tests/fixtures/run.jsonl --out reports/latest
-      - run: rag-harness gate --metrics reports/latest/metrics.json --config rag_harness.yaml

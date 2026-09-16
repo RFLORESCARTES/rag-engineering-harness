@@ -21,11 +21,17 @@ def parser() -> argparse.ArgumentParser:
     ev.add_argument("--run", required=True, type=Path)
     ev.add_argument("--config", type=Path, default=Path("rag_harness.yaml"))
     ev.add_argument("--corpus-manifest", type=Path)
+    ev.add_argument("--trust-anchor", type=Path)
+    ev.add_argument("--trust-anchor-sha256")
+    ev.add_argument("--audit-log", type=Path)
     ev.add_argument("--out", required=True, type=Path)
     gt = sub.add_parser("gate")
     gt.add_argument("--metrics", required=True, type=Path)
     gt.add_argument("--config", required=True, type=Path)
     gt.add_argument("--out", type=Path)
+    gt.add_argument("--trust-anchor", type=Path)
+    gt.add_argument("--trust-anchor-sha256")
+    gt.add_argument("--audit-log", type=Path)
     return root
 
 
@@ -37,12 +43,12 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps({"status": "PASS", "config": str(args.config)}))
             return 0
         if args.command == "evaluate":
-            result = evaluate(args.gold, args.run, args.config, args.out, args.corpus_manifest)
+            result = evaluate(args.gold, args.run, args.config, args.out, args.corpus_manifest, args.trust_anchor, args.trust_anchor_sha256, args.audit_log)
             print(json.dumps({"status": "EVALUATED", "queries": result["query_count"], "metrics": str(args.out / "metrics.json")}))
             return 0
         metrics = json.loads(args.metrics.read_text(encoding="utf-8"))
         output = args.out or args.metrics.with_name("gate.json")
-        result = gate(metrics, args.config, output)
+        result = gate(metrics, args.config, output, args.trust_anchor, args.trust_anchor_sha256, args.audit_log)
         print(json.dumps(result))
         return 0 if result["verdict"] == "PASS" else (2 if result["verdict"] == "BLOCKED" else 1)
     except BlockedError as exc:

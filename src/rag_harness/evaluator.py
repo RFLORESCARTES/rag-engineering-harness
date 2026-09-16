@@ -8,6 +8,7 @@ from typing import Any
 from .errors import BlockedError
 from .integrity import snapshot
 from .io import dump_json, load_config, load_jsonl
+from .trust import verify_trust_anchor
 
 
 def _unique_ids(rows: list[dict[str, Any]], label: str) -> dict[str, dict[str, Any]]:
@@ -34,6 +35,8 @@ def _validate_gold(row: dict[str, Any]) -> None:
     grades = row.get("graded_relevance", {})
     if not isinstance(grades, dict) or any(not isinstance(v, (int, float)) or isinstance(v, bool) or not math.isfinite(v) or v < 0 for v in grades.values()):
         raise BlockedError("INVALID_GOLD_SET", "graded_relevance must contain finite non-negative values")
+    if any(doc in grades and grades[doc] <= 0 for doc in relevant):
+        raise BlockedError("INVALID_GOLD_SET", "relevant documents must have positive graded_relevance")
     evidence = row.get("evidence", [])
     if not isinstance(evidence, list):
         raise BlockedError("INVALID_GOLD_SET", "evidence must be a list")
@@ -91,20 +94,34 @@ def _dcg(grades: list[float]) -> float:
     return sum(g / math.log2(i + 2) for i, g in enumerate(grades))
 
 
-def evaluate(gold_path: Path, run_path: Path, config_path: Path, out_dir: Path, corpus_manifest: Path | None = None) -> dict:
+def evaluate(gold_path: Path, run_path: Path, config_path: Path, out_dir: Path, corpus_manifest: Path | None = None, trust_anchor: Path | None = None, trust_anchor_sha256: str | None = None, audit_log: Path | None = None) -> dict:
     config = load_config(config_path)
     if config["evaluation"].get("require_corpus_manifest", False) and corpus_manifest is None:
         raise BlockedError("MISSING_CORPUS_MANIFEST", "a corpus manifest is required by configuration")
-    before = snapshot(gold_path, run_path, config_path, corpus_manifest)
+    if config.get("enterprise", {}).get("require_external_audit", False) and audit_log is None:
+        raise BlockedError("MISSING_AUDIT_EVIDENCE", "an independently captured audit log is required")
+    if config.get("integrity", {}).get("require_trust_anchor", False):
+        verify_trust_anchor(trust_anchor, trust_anchor_sha256, gold_path, config_path, corpus_manifest, audit_log, config.get("risk_profile", "R0"))
+    before = snapshot(gold_path, run_path, config_path, corpus_manifest, trust_anchor, audit_log)
     gold = _unique_ids(load_jsonl(gold_path), "gold")
     run = _unique_ids(load_jsonl(run_path), "run")
+    audit_by_decision: dict[str, dict[str, Any]] = {}
+    if audit_log is not None:
+        audit_rows = load_jsonl(audit_log)
+        for audit_row in audit_rows:
+            decision_id = audit_row.get("decision_id")
+            if not isinstance(decision_id, str) or not decision_id or decision_id in audit_by_decision:
+                raise BlockedError("INVALID_AUDIT_EVIDENCE", "audit decision_id values must be non-empty and unique")
+            audit_by_decision[decision_id] = audit_row
     manifest_ids: set[str] | None = None
+    manifest_by_id: dict[str, dict[str, Any]] = {}
     if corpus_manifest is not None:
         manifest_rows = load_jsonl(corpus_manifest)
         ids = [row.get("doc_id") for row in manifest_rows]
         if any(not isinstance(x, str) or not x for x in ids) or len(ids) != len(set(ids)):
             raise BlockedError("INVALID_CORPUS_MANIFEST", "manifest doc_id values must be non-empty and unique")
         manifest_ids = set(ids)
+        manifest_by_id = {row["doc_id"]: row for row in manifest_rows}
         if config["evaluation"].get("require_content_hashes", False):
             for row in manifest_rows:
                 digest = row.get("sha256")
@@ -123,17 +140,27 @@ def evaluate(gold_path: Path, run_path: Path, config_path: Path, out_dir: Path, 
         _validate_run(row, bool(config["evaluation"].get("require_provenance", True)))
         if config.get("risk_profile", "R0") in {"R2", "R3"}:
             _validate_enterprise_run(row)
+            if config.get("enterprise", {}).get("require_external_audit", False):
+                observed_audit = row["audit"]
+                trusted_audit = audit_by_decision.get(observed_audit.get("decision_id"))
+                fields = ("query_id", "actor_id", "tenant_id", "policy_id", "decision_id", "decision")
+                if trusted_audit is None or any(trusted_audit.get(field) != (row.get("query_id") if field == "query_id" else row.get("decision") if field == "decision" else observed_audit.get(field)) for field in fields):
+                    raise BlockedError("AUDIT_ATTESTATION_MISMATCH", f"{row['query_id']}: run audit is not corroborated by trusted audit evidence")
     missing = sorted(gold.keys() - run.keys())
     unknown = sorted(run.keys() - gold.keys())
     if unknown or (missing and config["evaluation"].get("require_complete_query_set", True)):
         raise BlockedError("QUERY_SET_MISMATCH", f"missing={missing}; unknown={unknown}")
+    evaluated_ids = [qid for qid in gold if qid in run]
+    if not evaluated_ids:
+        raise BlockedError("MISSING_EVIDENCE", "run contains no evaluable gold queries")
 
     ks = config["evaluation"]["k_values"]
     accum = {k: {m: [] for m in ("hit_rate", "recall", "precision", "mrr", "ndcg")} for k in ks}
     citation_precision, citation_recall, abstention, latency, cost, per_query = [], [], [], [], [], []
     authorization, audit_scores = [], []
     cross_tenant_leakage_count = forbidden_output_count = 0
-    for qid, expected in gold.items():
+    for qid in evaluated_ids:
+        expected = gold[qid]
         actual = run[qid]
         relevant = set(expected["relevant_doc_ids"])
         ranked = [x["doc_id"] for x in sorted(actual["retrieved"], key=lambda x: x["rank"])]
@@ -172,6 +199,13 @@ def evaluate(gold_path: Path, run_path: Path, config_path: Path, out_dir: Path, 
             authorization.append(float(actual.get("decision") == expected_action))
         forbidden_docs = set(expected.get("forbidden_doc_ids", []))
         leaked_docs = sorted(forbidden_docs & set(ranked))
+        if config.get("risk_profile", "R0") in {"R2", "R3"} and manifest_by_id:
+            actor_tenant = actual.get("audit", {}).get("tenant_id")
+            unknown_retrieved = [doc for doc in ranked if doc not in manifest_by_id]
+            if unknown_retrieved:
+                raise BlockedError("CORPUS_REFERENCE_MISMATCH", f"retrieved documents absent from manifest: {unknown_retrieved}")
+            tenant_leaks = [doc for doc in ranked if manifest_by_id[doc].get("tenant_id") not in {None, actor_tenant}]
+            leaked_docs = sorted(set(leaked_docs) | set(tenant_leaks))
         cross_tenant_leakage_count += len(leaked_docs)
         answer_text = actual.get("answer", "")
         if not isinstance(answer_text, str):
@@ -195,6 +229,8 @@ def evaluate(gold_path: Path, run_path: Path, config_path: Path, out_dir: Path, 
         "schema_version": "2.0",
         "status": "EVALUATED",
         "query_count": len(gold),
+        "evaluated_query_count": len(evaluated_ids),
+        "query_coverage": len(evaluated_ids) / len(gold),
         "metrics": {
             "retrieval": aggregate,
             "citation_precision": statistics.fmean(citation_precision),
@@ -211,7 +247,7 @@ def evaluate(gold_path: Path, run_path: Path, config_path: Path, out_dir: Path, 
         "per_query": per_query,
         "integrity": {"before": before},
     }
-    after = snapshot(gold_path, run_path, config_path, corpus_manifest)
+    after = snapshot(gold_path, run_path, config_path, corpus_manifest, trust_anchor, audit_log)
     metrics["integrity"]["after"] = after
     if before != after:
         raise BlockedError("EVALUATION_CONTRACT_MUTATED", "evaluation inputs or evaluator changed during execution")

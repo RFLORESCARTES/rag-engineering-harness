@@ -27,7 +27,7 @@ def evaluator_hash() -> str:
     return digest.hexdigest()
 
 
-def snapshot(gold: Path, run: Path, config: Path, corpus_manifest: Path | None = None) -> dict:
+def snapshot(gold: Path, run: Path, config: Path, corpus_manifest: Path | None = None, trust_anchor: Path | None = None, audit_log: Path | None = None) -> dict:
     files = {
         "gold": {"path": str(gold.resolve()), "sha256": sha256_file(gold)},
         "run": {"path": str(run.resolve()), "sha256": sha256_file(run)},
@@ -38,6 +38,10 @@ def snapshot(gold: Path, run: Path, config: Path, corpus_manifest: Path | None =
             "path": str(corpus_manifest.resolve()),
             "sha256": sha256_file(corpus_manifest),
         }
+    if trust_anchor is not None:
+        files["trust_anchor"] = {"path": str(trust_anchor.resolve()), "sha256": sha256_file(trust_anchor)}
+    if audit_log is not None:
+        files["audit_log"] = {"path": str(audit_log.resolve()), "sha256": sha256_file(audit_log)}
     return {
         "algorithm": "sha256",
         "files": files,

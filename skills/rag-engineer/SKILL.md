@@ -47,13 +47,18 @@ then `protocols/00-intake-risk.md`, and only the protocol for the active phase.
 ```bash
 rag-harness validate-config PROFILE.json
 rag-harness evaluate --gold GOLD.jsonl --run RUN.jsonl \
-  --config PROFILE.json --corpus-manifest CORPUS.jsonl --out REPORT_DIR
+  --config PROFILE.json --corpus-manifest CORPUS.jsonl \
+  --audit-log AUDIT.jsonl --trust-anchor APPROVED.json --out REPORT_DIR
 rag-harness gate --metrics REPORT_DIR/metrics.json \
-  --config PROFILE.json --out REPORT_DIR/gate.json
+  --config PROFILE.json --audit-log AUDIT.jsonl \
+  --trust-anchor APPROVED.json --out REPORT_DIR/gate.json
 ```
 
 Do not call `gate` on hand-authored metrics. The gate recomputes decision
 evidence and blocks any mismatch.
+For R2-R3, require the trust-anchor SHA-256 from a protected source outside the
+evaluated checkout. An anchor and digest both writable by the evaluated agent
+do not establish trust.
 
 ## Fail fast and report
 

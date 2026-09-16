@@ -4,7 +4,7 @@ Framework-agnostic, deterministic-first harness for empirical validation,
 diagnosis, controlled optimization, regression testing, and release gating of
 Retrieval-Augmented Generation (RAG) systems.
 
-**Version:** 0.3.0
+**Version:** 0.4.0
 
 ## What this repository does
 
@@ -14,11 +14,17 @@ an adapter only needs to export canonical JSONL. The harness itself makes no API
 calls and the included smoke test requires no keys, network, embeddings, or paid
 models.
 
-Version 0.3 can freeze a corpus manifest, evaluate citations at evidence-locator
+Version 0.4 can freeze a corpus manifest, evaluate citations at evidence-locator
 level, and recomputes gate metrics from the recorded immutable inputs so an
 edited `metrics.json` becomes `BLOCKED`. Risk profiles R0-R3 add deterministic
 enterprise authorization, audit, cross-tenant leakage, forbidden-output, and
 mandatory-human-approval gates without asking the LLM to police itself.
+
+R2-R3 additionally require an external trust root. A trust anchor approves the
+evaluator, gold, risk configuration, corpus manifest, and independent audit log;
+its SHA-256 MUST be supplied from outside the evaluated checkout. This prevents
+a modified evaluator, substituted gold, or profile downgrade from approving
+itself through internally consistent hashes.
 
 ## Design principles
 
@@ -47,6 +53,18 @@ mandatory-human-approval gates without asking the LLM to police itself.
 
 Use `profiles/r2-confidential.json` or `profiles/r3-regulated.json` as strict
 starting points. Do not weaken them after observing failures.
+
+## External trust root for R2-R3
+
+After independent review, create an approval candidate with
+`scripts/create_trust_anchor.py`. Store its printed SHA-256 in a protected CI
+secret or deployment policy outside this repository. Supply that digest through
+`RAG_HARNESS_TRUST_ANCHOR_SHA256` or `--trust-anchor-sha256` to both `evaluate`
+and `gate`, together with the same read-only `--trust-anchor` and independent
+`--audit-log`.
+
+Keeping both the anchor and its digest inside a writable evaluated checkout is
+not an external root of trust and MUST be reported as BLOCKED for production.
 
 ## Quick start
 
@@ -112,6 +130,9 @@ R2-R3 runs additionally declare `decision` plus an `audit` object. Enterprise
 gold cases declare `expected_action`, `forbidden_doc_ids`, and optional
 `forbidden_output_markers`. A forbidden document entering retrieved context is
 a critical failure even if it is omitted from the final answer.
+Tenant isolation is also derived from `tenant_id` in the corpus manifest and
+the independently corroborated audit identity; it does not depend solely on
+enumerating forbidden documents in the gold set.
 
 ## Metrics and integrity
 
